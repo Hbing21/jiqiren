@@ -18,7 +18,7 @@ import subprocess, os, json, mimetypes, time, threading, signal, sys
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # ─── 配置 ─────────────────────────────────────────────────────────────────────
-PORT       = 8022
+PORT       = 8021
 
 # 用户 App 触发的脚本：手臂动作触发节点（绝对路径）
 TEST1_PY    = "/home/lab/kuavo-ros-opensource/src/demo/examples_code/hand_plan_arm_trajectory/test1.py"
