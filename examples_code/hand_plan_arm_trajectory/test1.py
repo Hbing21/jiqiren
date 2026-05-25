@@ -76,7 +76,7 @@ def traj_callback(msg):
 def call_change_arm_ctrl_mode_service(arm_ctrl_mode):
     service_name = "humanoid_change_arm_ctrl_mode"
     try:
-        rospy.wait_for_service(service_name, timeout=0.5)
+        rospy.wait_for_service(service_name, timeout=3.0)
         srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
         srv(control_mode=arm_ctrl_mode)
         rospy.loginfo("arm ctrl mode 服务调用成功")
@@ -142,9 +142,17 @@ def plan_arm_traj_cubicspline_demo():
 
 # ─── 拍照触发（非阻塞，失败不影响运动）──────────────────────────────────────
 PHOTO_SERVER = os.environ.get("PHOTO_SERVER", "http://192.168.0.73:8021")
+GRIP_GESTURE = os.environ.get("GRIP_GESTURE", "thumbs-up")
+GRIP_HAND_SIDE = 1
+ENABLE_START_GRIP = os.environ.get("ENABLE_START_GRIP", "1") == "1"
+
+# 轨迹结束后可选执行“松开五指/张开手掌”手势（默认开启）
+RELEASE_ON_FINISH = os.environ.get("RELEASE_ON_FINISH", "1") == "1"
+RELEASE_GESTURE = os.environ.get("RELEASE_GESTURE", "palm-open")
+RELEASE_HAND_SIDE = int(os.environ.get("RELEASE_HAND_SIDE", str(GRIP_HAND_SIDE)))
 
 
-def trigger_photo_session(count=10, delay_ms=1000, interval_ms=100):
+def trigger_photo_session(count=6, delay_ms=1000, interval_ms=100):
     url = f"{PHOTO_SERVER}/session/start"
     payload = {
         "count": int(count),
@@ -153,7 +161,7 @@ def trigger_photo_session(count=10, delay_ms=1000, interval_ms=100):
         "client_ts": time.time(),
     }
     try:
-        r = requests.post(url, json=payload, timeout=0.8)
+        r = requests.post(url, json=payload, timeout=3.0)
         r.raise_for_status()
         data = r.json()
         if data.get("ok", False):
@@ -190,6 +198,10 @@ def main():
 
     call_change_arm_ctrl_mode_service(2)
 
+    # 动作开始前可选设置右手握持；若只想松开、不想握紧：ENABLE_START_GRIP=0
+    if ENABLE_START_GRIP:
+        gesture_client(GRIP_GESTURE, GRIP_HAND_SIDE)
+
     rospy.loginfo("Waiting for current_arm_joint_state from /sensors_data_raw ...")
     while not rospy.is_shutdown() and len(current_arm_joint_state) == 0:
         rospy.sleep(0.01)
@@ -222,8 +234,7 @@ def main():
 
     traj_start = rospy.Time.now().to_sec()
 
-    #right_gesture_name = "thumbs-up"  # 右手：点赞
-    #gesture_client(right_gesture_name, hand_side=1)  # 右手立即开始手势
+    # 手势由 server1.py 启动时统一控制，此处不再重复调用
 
     photo_triggered = False
 
@@ -233,14 +244,12 @@ def main():
         if len(joint_state.position) != 0:
             kuavo_arm_traj_pub.publish(joint_state)
 
-    
-
         elapsed = rospy.Time.now().to_sec() - traj_start
 
         # 第二个动作完成：触发手机连拍（非阻塞）
         if not photo_triggered and elapsed >= second_motion_done_t:
             rospy.loginfo(f"[photo] elapsed={elapsed:.1f}s 触发连拍")
-            trigger_photo_session(count=10, delay_ms=1000, interval_ms=100)
+            trigger_photo_session(count=6, delay_ms=1000, interval_ms=100)
             photo_triggered = True
 
         # 到"最后时间 + 余量"自动退出
@@ -250,11 +259,12 @@ def main():
 
         rate.sleep()
 
-    # 退出前取消右手手势
-    #rospy.loginfo("[gesture] 取消右手手势")
-    #gesture_client("empty", hand_side=1)
+    # 保持右手握持手势（由 server1.py 统一管理）
 
     # 退出清理
+    if RELEASE_ON_FINISH:
+        rospy.loginfo(f"[gesture] finish -> '{RELEASE_GESTURE}' (hand_side={RELEASE_HAND_SIDE})")
+        gesture_client(RELEASE_GESTURE, RELEASE_HAND_SIDE)
     rospy.signal_shutdown("arm trajectory finished")
     rospy.sleep(0.1)
 
